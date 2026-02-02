@@ -10,7 +10,20 @@ const MythicTask = struct {
 fn findTasksArray(server_response: []const u8) []const u8 {
     const needle = "\"tasks\":";
     const tasks_begin = std.mem.indexOf(u8, server_response, needle).? + needle.len;
-    const tasks_end = std.mem.indexOf(u8, server_response[tasks_begin..], "]").? + tasks_begin + 1;
+    var x: usize = 0;
+    const tasks_end = for (server_response[tasks_begin + 1 ..], 0..) |c, i| {
+        switch (c) {
+            '[' => {
+                //std.debug.print("Found opening brace\n", .{});
+                x += 1;
+            },
+            ']' => {
+                if (x == 0) break i + tasks_begin + 2 else x -= 1;
+            },
+            else => continue,
+        }
+    } else unreachable;
+    std.debug.print("{d} : {d}\n", .{ tasks_begin, tasks_end });
     return server_response[tasks_begin..tasks_end];
 }
 
@@ -21,6 +34,13 @@ pub fn main() !void {
     const server_response_2 =
         \\{"action":"get_tasking","tasks":[], "responses":[{"task_id":"response_1"}]}
     ;
+    const server_response_3 =
+        \\{"action":"get_tasking","tasks":[{"command": "command name","parameters":"["a","b","c"]","timestamp":1578706611.324671,"id":"task uuid"}], "responses":[{"task_id":"response_1"}]}
+    ;
+
+    const server_response_4 =
+        \\{"tasks":[],"action":"get_tasking","responses":[{"task_id":"daaa9de5-6bcc-47d3-9ee3-30dab0612a18","status":"success","file_id":"fd85e316-3553-45b1-bd12-da31ba4cd32f"}]}
+    ;
 
     var debug_alloc = std.heap.DebugAllocator(.{}){};
     defer std.debug.assert(debug_alloc.deinit() == .ok);
@@ -30,6 +50,10 @@ pub fn main() !void {
     std.debug.print("{s}\n", .{parsed});
     const parsed2 = findTasksArray(server_response_2);
     std.debug.print("{s}\n", .{parsed2});
+    const parsed3 = findTasksArray(server_response_3);
+    std.debug.print("{s}\n", .{parsed3});
+    const parsed4 = findTasksArray(server_response_4);
+    std.debug.print("{s}\n", .{parsed4});
 
     const bigparse = try std.json.parseFromSlice([]MythicTask, allocator, parsed, .{});
     defer bigparse.deinit();
