@@ -2,6 +2,25 @@ const std = @import("std");
 const clr = @import("clr.zig");
 const win = std.os.windows;
 
+extern "kernel32" fn CreateNamedPipeA(
+    lpName: win.LPCSTR,
+    dwOpenMode: win.DWORD,
+    dwPipeMode: win.DWORD,
+    nMaxInstances: win.DWORD,
+    nOutBufferSize: win.DWORD,
+    nInBufferSize: win.DWORD,
+    nDefaultTimeOut: win.DWORD,
+    lpSecurityAttributes: ?*const win.SECURITY_ATTRIBUTES,
+) callconv(.winapi) win.HANDLE;
+extern "kernel32" fn CreateFileA(
+    lpFileName: win.LPCSTR,
+    dwDesiredAccess: win.DWORD,
+    dwShareMode: win.DWORD,
+    lpSecurityAttributes: ?*win.SECURITY_ATTRIBUTES,
+    dwCreationDisposition: win.DWORD,
+    dwFlagsAndAttributes: win.DWORD,
+    hTemplateFile: ?win.HANDLE,
+) callconv(.winapi) win.HANDLE;
 extern "shell32" fn CommandLineToArgvW(lpCmdLine: win.LPWSTR, pNumArgs: *c_int) [*]win.LPWSTR;
 extern "oleaut32" fn SafeArrayCreateVector(vt: clr.VARTYPE, lower_bound: win.LONG, count: win.ULONG) ?*clr.SAFEARRAY;
 extern "oleaut32" fn SafeArrayPutElement(psa: *clr.SAFEARRAY, rgIndices: *win.LONG, pv: *anyopaque) win.HRESULT;
@@ -12,11 +31,13 @@ extern "oleaut32" fn SafeArrayUnaccessData(psa: *clr.SAFEARRAY) win.HRESULT;
 extern "oleaut32" fn SafeArrayDestroy(psa: *clr.SAFEARRAY) win.HRESULT;
 extern "oleaut32" fn VariantClear(pvarg: *clr.VARIANTARG) win.HRESULT;
 
-const fnCLRCreateInstance = *const fn (
-    clsid: *const clr.GUID,
-    riid: *const clr.GUID,
-    ppInterface: *?*anyopaque,
-) callconv(.winapi) win.HRESULT;
+const fnCLRCreateInstance = *const fn (clsid: *const clr.GUID, riid: *const clr.GUID, ppInterface: *?*anyopaque) callconv(.winapi) win.HRESULT;
+const fnAttachConsole = *const fn (dwProcessId: win.DWORD) callconv(.winapi) win.BOOL;
+const fnAllocConsole = *const fn () callconv(.winapi) win.BOOL;
+const fnGetConsoleWindow = *const fn () callconv(.winapi) win.HWND;
+const fnShowWindow = *const fn (hWnd: win.HWND, nCmdShow: c_int) callconv(.winapi) win.BOOL;
+const fnGetStdHandle = *const fn (nStdHandle: win.DWORD) callconv(.winapi) win.HANDLE;
+const fnSetStdHandle = *const fn (nStdHandle: win.DWORD, hHandle: win.HANDLE) callconv(.winapi) win.BOOL;
 
 const xCLSID_CorRuntimeHost: clr.GUID = .{
     .Data1 = 0xcb2f6723,
@@ -88,20 +109,53 @@ fn findVersion(assembly: []const u8) bool { // this doesnt work right
     const v4 = &.{ 0x76, 0x34, 0x2E, 0x30, 0x2E, 0x33, 0x30, 0x33, 0x31, 0x39 };
 
     for (assembly, 0..) |_, i| {
-        if (std.mem.eql(u8, assembly[i..], v4)) {
+        if (std.mem.eql(u8, assembly[i .. i + v4.len], v4)) {
             return true;
         }
     }
-    //return false;
-    return true;
+    return false;
 }
+
+//fn createPipedConsole(_: std.mem.Allocator) !void {
+//    const k32 = try std.DynLib.open("kernel32.dll");
+//    defer k32.close();
+//    const user32 = try std.DynLib.open("user32.dll");
+//    defer user32.close();
+//
+//    const AttachConsole = k32.lookup(fnAttachConsole, "AttachConsole") orelse return error.SymbolNotFound;
+//    const AllocConsole = k32.lookup(fnAllocConsole, "AllocConsole") orelse return error.SymbolNotFound;
+//    const GetConsoleWindow = k32.lookup(fnAllocConsole, "GetConsoleWindow") orelse return error.SymbolNotFound;
+//    const GetStdHandle = k32.lookup(fnGetStdHandle, "GetStdHandle") orelse return error.SymbolNotFound;
+//    const SetStdHandle = k32.lookup(fnSetStdHandle, "SetStdHandle") orelse return error.SymbolNotFound;
+//    const ShowWindow = user32.lookup(fnShowWindow, "ShowWindow") orelse return error.SymbolNotFound;
+//
+//    if (AttachConsole(@bitCast(@as(i32, -11))) != 0) {
+//        if (AllocConsole() != 0) return error.FailedConsoleAllocation;
+//        const h_window = GetConsoleWindow();
+//        if (h_window == 0) return error.CouldNotGetConsole;
+//        _ = ShowWindow(h_window, 0);
+//    }
+//
+//    var h_pipe_read: win.HANDLE = undefined;
+//    var h_pipe_write: win.HANDLE = undefined;
+//    var sa = win.SECURITY_ATTRIBUTES{
+//        .nLength = @sizeOf(win.SECURITY_ATTRIBUTES),
+//        .bInheritHandle = win.TRUE,
+//        .lpSecurityDescriptor = null,
+//    };
+//    _ = win.CreatePipe(&h_pipe_read, &h_pipe_write, &sa);
+//
+//    const stdout = GetStdHandle(-11);
+//    if (stdout == win.INVALID_HANDLE_VALUE) return error.CouldNotGetStdout;
+//
+//    if (SetStdHandle(-11, h_pipe_read) == 0) return error.CouldNotSetStdout;
+//}
 
 fn startCLR(dotnet_version: win.LPCWSTR, ppClrMetaHost: **clr.ICLRMetaHost, ppClrRuntimeInfo: **clr.ICLRRuntimeInfo, ppICorRuntimeHost: **clr.ICorRuntimeHost) !bool {
     var dll = try std.DynLib.open("mscoree.dll");
     defer dll.close();
 
-    const CLRCreateInstance = dll.lookup(fnCLRCreateInstance, "CLRCreateInstance") orelse
-        return error.SymbolNotFound;
+    const CLRCreateInstance = dll.lookup(fnCLRCreateInstance, "CLRCreateInstance") orelse return error.SymbolNotFound;
 
     var hr: win.HRESULT = CLRCreateInstance(&xCLSID_CLRMetaHost, &xIID_ICLRMetaHost, @ptrCast(ppClrMetaHost));
     if (hr != win.S_OK) {
@@ -189,6 +243,45 @@ fn executeAssembly(allocator: std.mem.Allocator, assembly: []const u8, args: []c
     var pCORRuntimeHost: *clr.ICorRuntimeHost = undefined;
     _ = try startCLR(w_dotnet_version, &pCLRMetaHost, &pCLRRuntimeInfo, &pCORRuntimeHost);
 
+    var k32 = try std.DynLib.open("kernel32.dll");
+    defer k32.close();
+    var user32 = try std.DynLib.open("user32.dll");
+    defer user32.close();
+    const AttachConsole = k32.lookup(fnAttachConsole, "AttachConsole") orelse return error.SymbolNotFound;
+    const AllocConsole = k32.lookup(fnAllocConsole, "AllocConsole") orelse return error.SymbolNotFound;
+    const GetConsoleWindow = k32.lookup(fnAllocConsole, "GetConsoleWindow") orelse return error.SymbolNotFound;
+    const GetStdHandle = k32.lookup(fnGetStdHandle, "GetStdHandle") orelse return error.SymbolNotFound;
+    const SetStdHandle = k32.lookup(fnSetStdHandle, "SetStdHandle") orelse return error.SymbolNotFound;
+    const ShowWindow = user32.lookup(fnShowWindow, "ShowWindow") orelse return error.SymbolNotFound;
+
+    if (AttachConsole(@bitCast(@as(i32, -11))) != 0) {
+        std.debug.print("Console does not exist\n", .{});
+        if (AllocConsole() != 0) return error.FailedConsoleAllocation;
+        const h_window = GetConsoleWindow();
+        if (h_window == 0) return error.CouldNotGetConsole;
+        _ = ShowWindow(@ptrFromInt(@as(usize, @intCast(h_window))), 0);
+    }
+
+    const h_pipe = CreateNamedPipeA("\\\\.\\pipe\\bingle", win.PIPE_ACCESS_DUPLEX, win.PIPE_TYPE_MESSAGE, 1, 65535, 65535, 0, null);
+    if (h_pipe == win.INVALID_HANDLE_VALUE) return error.CannotCreatePipe;
+    defer win.CloseHandle(h_pipe);
+
+    //const pipe_path = try std.unicode.utf8ToUtf16LeAlloc(allocator, "\\\\.\\pipe\\bingle");
+    //defer allocator.free(pipe_path);
+    //const h_pipe_connection = try win.OpenFile(pipe_path, .{ .creation = win.OPEN_EXISTING, .access_mask = win.FILE_GENERIC_WRITE });
+    //defer win.CloseHandle(h_pipe_connection);
+    const h_pipe_connection = CreateFileA("\\\\.\\pipe\\bingle", win.GENERIC_WRITE, win.FILE_SHARE_READ, null, win.OPEN_EXISTING, win.FILE_ATTRIBUTE_NORMAL, null);
+    if (h_pipe_connection == win.INVALID_HANDLE_VALUE) return error.CannotOpenPipe;
+    defer win.CloseHandle(h_pipe_connection);
+
+    const stdout = GetStdHandle(win.STD_OUTPUT_HANDLE);
+    if (stdout == win.INVALID_HANDLE_VALUE) return error.CouldNotGetStdout;
+
+    std.debug.print("Setting stdout\n", .{});
+    if (SetStdHandle(win.STD_OUTPUT_HANDLE, h_pipe_connection) == 0) return error.CouldNotSetStdout;
+    std.debug.print("Set stdout\n", .{});
+    //if (SetStdHandle(win.STD_OUTPUT_HANDLE, stdout) == 0) return error.CouldNotSetStdout;
+
     const w_appdomain = try utf8ToUtf16LeSentinel(allocator, "silly_domain");
     defer allocator.free(w_appdomain);
     var appdomain_thunk: *clr.IUnknown = undefined;
@@ -239,9 +332,18 @@ fn executeAssembly(allocator: std.mem.Allocator, assembly: []const u8, args: []c
     var idx: i32 = 0;
     _ = SafeArrayPutElement(psa_method_args, &idx, &vt_psa);
 
+    std.debug.print("Invoking\n", .{});
     hr = method_info.lpVtbl.*.Invoke_3(method_info, obj, @ptrCast(psa_method_args), @ptrCast(&ret_val));
 
     //TODO: read output
+    std.debug.print("Reading..\n", .{});
+    var output_buf = try allocator.alloc(u8, 65535);
+    defer allocator.free(output_buf);
+    const output_size = try win.ReadFile(h_pipe, output_buf, null);
+    const output = output_buf[0..output_size];
+
+    _ = SetStdHandle(win.STD_OUTPUT_HANDLE, stdout);
+    std.debug.print("[=================READ_PIPE=================]\n{s}\n[=================READ_PIPE=================]\n", .{output});
 
     _ = SafeArrayDestroy(safe_array);
     _ = VariantClear(&ret_val);
@@ -259,7 +361,7 @@ fn executeAssembly(allocator: std.mem.Allocator, assembly: []const u8, args: []c
 }
 
 pub fn main() !void {
-    std.debug.print("[+] No assert vtable 3\n", .{});
+    std.debug.print("[+] No assert vtable 19\n", .{});
     var debug_alloc = std.heap.DebugAllocator(.{}){};
     defer std.debug.assert(debug_alloc.deinit() == .ok);
     const dba = debug_alloc.allocator();
