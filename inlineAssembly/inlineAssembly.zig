@@ -113,29 +113,27 @@ fn startCLR(dotnet_version: win.LPCWSTR, ppClrMetaHost: **clr.ICLRMetaHost, ppCl
     const a_dotnet_version_end = try std.unicode.utf16LeToUtf8(&a_dotnet_version_buf, w_dotnet_version);
     const a_dotnet_version = a_dotnet_version_buf[0..a_dotnet_version_end];
 
-    const metahost_vt = &ppClrMetaHost.*.*.lpVtbl.?.*;
     std.debug.print("[startCLR:GetRuntime] {s} : {}\n", .{ a_dotnet_version, ppClrRuntimeInfo });
-    //hr = ppClrMetaHost.*.*.lpVtbl.?.*.GetRuntime.?(ppClrMetaHost.*, dotnet_version, &metahost.IID_ICLRRuntimeInfo, @ptrCast(ppClrRuntimeInfo));
-    hr = metahost_vt.*.GetRuntime.?(ppClrMetaHost.*, dotnet_version, &xIID_ICLRRuntimeInfo, @ptrCast(ppClrRuntimeInfo));
+    hr = ppClrMetaHost.*.lpVtbl.*.GetRuntime(ppClrMetaHost.*, dotnet_version, &xIID_ICLRRuntimeInfo, @ptrCast(ppClrRuntimeInfo));
     if (hr != win.S_OK) {
         std.debug.print("[ERR:GetRuntime] : {}\n", .{hr});
         return false;
     }
 
     var loadable: win.BOOL = win.FALSE;
-    hr = ppClrRuntimeInfo.*.lpVtbl.?.*.IsLoadable.?(ppClrRuntimeInfo.*, &loadable);
+    hr = ppClrRuntimeInfo.*.lpVtbl.*.IsLoadable(ppClrRuntimeInfo.*, &loadable);
     if (loadable != win.TRUE or hr != win.S_OK) {
         std.debug.print("[ERR:IsLoadable] : {} : {}\n", .{ loadable, hr });
         return false;
     }
 
-    hr = ppClrRuntimeInfo.*.lpVtbl.?.*.GetInterface.?(ppClrRuntimeInfo.*, &xCLSID_CorRuntimeHost, &xIID_ICorRuntimeHost, @ptrCast(ppICorRuntimeHost));
+    hr = ppClrRuntimeInfo.*.lpVtbl.*.GetInterface(ppClrRuntimeInfo.*, &xCLSID_CorRuntimeHost, &xIID_ICorRuntimeHost, @ptrCast(ppICorRuntimeHost));
     if (hr != win.S_OK) {
         std.debug.print("[ERR:GetInterface] : {}\n", .{hr});
         return false;
     }
 
-    hr = ppICorRuntimeHost.*.lpVtbl.?.*.Start.?(ppICorRuntimeHost.*);
+    hr = ppICorRuntimeHost.*.lpVtbl.*.Start(ppICorRuntimeHost.*);
     if (hr != win.S_OK) {
         std.debug.print("[ERR:Start] : {}\n", .{hr});
         return false;
@@ -194,12 +192,12 @@ fn executeAssembly(allocator: std.mem.Allocator, assembly: []const u8, args: []c
     const w_appdomain = try utf8ToUtf16LeSentinel(allocator, "silly_domain");
     defer allocator.free(w_appdomain);
     var appdomain_thunk: *clr.IUnknown = undefined;
-    var hr: win.HRESULT = pCORRuntimeHost.*.lpVtbl.?.*.CreateDomain.?(pCORRuntimeHost, w_appdomain, null, @ptrCast(&appdomain_thunk));
+    var hr: win.HRESULT = pCORRuntimeHost.*.lpVtbl.*.CreateDomain(pCORRuntimeHost, w_appdomain, null, @ptrCast(&appdomain_thunk));
     if (hr != win.S_OK) {
         std.debug.print("[ERR:CreateDomain] : {}\n", .{hr});
     }
     var appdomain: *clr.AppDomain = undefined;
-    hr = appdomain_thunk.*.lpVtbl.?.*.QueryInterface.?(appdomain_thunk, &xIID_AppDomain, @ptrCast(&appdomain));
+    hr = appdomain_thunk.lpVtbl.*.QueryInterface(appdomain_thunk, &xIID_AppDomain, @ptrCast(&appdomain));
     if (hr != win.S_OK) {
         std.debug.print("[ERR:QueryInterface] : {}\n", .{hr});
     }
@@ -222,13 +220,13 @@ fn executeAssembly(allocator: std.mem.Allocator, assembly: []const u8, args: []c
     }
 
     var loaded_assembly: *clr.Assembly = undefined;
-    hr = appdomain.lpVtbl.?.*.Load_3.?(appdomain, safe_array, @ptrCast(&loaded_assembly));
+    hr = appdomain.lpVtbl.*.Load_3(appdomain, safe_array, @ptrCast(&loaded_assembly));
     if (hr != win.S_OK) {
         std.debug.print("[ERR:Load_3] : {}\n", .{hr});
     }
 
     var method_info: *clr.MethodInfo = undefined;
-    hr = loaded_assembly.lpVtbl.?.*.EntryPoint.?(loaded_assembly, @ptrCast(&method_info));
+    hr = loaded_assembly.lpVtbl.*.EntryPoint(loaded_assembly, @ptrCast(&method_info));
     if (hr != win.S_OK) {
         std.debug.print("[ERR:EntryPoint] : {}\n", .{hr});
     }
@@ -241,7 +239,7 @@ fn executeAssembly(allocator: std.mem.Allocator, assembly: []const u8, args: []c
     var idx: i32 = 0;
     _ = SafeArrayPutElement(psa_method_args, &idx, &vt_psa);
 
-    hr = method_info.lpVtbl.*.Invoke_3.?(method_info, obj, @ptrCast(psa_method_args), @ptrCast(&ret_val));
+    hr = method_info.lpVtbl.*.Invoke_3(method_info, obj, @ptrCast(psa_method_args), @ptrCast(&ret_val));
 
     //TODO: read output
 
@@ -251,16 +249,17 @@ fn executeAssembly(allocator: std.mem.Allocator, assembly: []const u8, args: []c
     _ = VariantClear(&vt_psa);
 
     _ = SafeArrayDestroy(psa_method_args);
-    _ = method_info.lpVtbl.*.Release.?(method_info);
-    _ = loaded_assembly.lpVtbl.*.Release.?(loaded_assembly);
-    _ = appdomain.lpVtbl.*.Release.?(appdomain);
-    _ = appdomain_thunk.lpVtbl.*.Release.?(appdomain_thunk);
-    _ = pCORRuntimeHost.lpVtbl.*.Release.?(pCORRuntimeHost);
-    _ = pCLRRuntimeInfo.lpVtbl.*.Release.?(pCLRRuntimeInfo);
-    _ = pCLRMetaHost.lpVtbl.*.Release.?(pCLRMetaHost);
+    _ = method_info.lpVtbl.*.Release(method_info);
+    _ = loaded_assembly.lpVtbl.*.Release(loaded_assembly);
+    _ = appdomain.lpVtbl.*.Release(appdomain);
+    _ = appdomain_thunk.lpVtbl.*.Release(appdomain_thunk);
+    _ = pCORRuntimeHost.lpVtbl.*.Release(pCORRuntimeHost);
+    _ = pCLRRuntimeInfo.lpVtbl.*.Release(pCLRRuntimeInfo);
+    _ = pCLRMetaHost.lpVtbl.*.Release(pCLRMetaHost);
 }
 
 pub fn main() !void {
+    std.debug.print("[+] No assert vtable 3\n", .{});
     var debug_alloc = std.heap.DebugAllocator(.{}){};
     defer std.debug.assert(debug_alloc.deinit() == .ok);
     const dba = debug_alloc.allocator();

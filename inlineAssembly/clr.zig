@@ -53,9 +53,9 @@ pub const IUnknown = extern struct {
 };
 
 pub const IUnknownVtbl = extern struct {
-    QueryInterface: ?*const fn ([*c]IUnknown, [*c]const GUID, [*c]?*anyopaque) callconv(.c) win.HRESULT,
-    AddRef: ?*const fn ([*c]IUnknown) callconv(.c) win.ULONG,
-    Release: ?*const fn ([*c]IUnknown) callconv(.c) win.ULONG,
+    QueryInterface: *const fn ([*c]IUnknown, [*c]const GUID, [*c]?*anyopaque) callconv(.c) win.HRESULT,
+    AddRef: *const fn ([*c]IUnknown) callconv(.c) win.ULONG,
+    Release: *const fn ([*c]IUnknown) callconv(.c) win.ULONG,
 };
 
 pub const ICLRMetaHost = extern struct {
@@ -63,10 +63,10 @@ pub const ICLRMetaHost = extern struct {
 };
 
 pub const ICLRMetaHostVtbl = extern struct {
-    QueryInterface: ?*const fn ([*c]ICLRMetaHost, [*c]const GUID, [*c]?*anyopaque) callconv(.c) win.HRESULT,
-    AddRef: ?*const fn ([*c]ICLRMetaHost) callconv(.c) win.ULONG,
-    Release: ?*const fn ([*c]ICLRMetaHost) callconv(.c) win.ULONG,
-    GetRuntime: ?*const fn ([*c]ICLRMetaHost, win.LPCWSTR, [*c]const GUID, [*c]win.LPVOID) callconv(.c) win.HRESULT,
+    QueryInterface: *const fn ([*c]ICLRMetaHost, [*c]const GUID, [*c]?*anyopaque) callconv(.c) win.HRESULT,
+    AddRef: *const fn ([*c]ICLRMetaHost) callconv(.c) win.ULONG,
+    Release: *const fn ([*c]ICLRMetaHost) callconv(.c) win.ULONG,
+    GetRuntime: *const fn ([*c]ICLRMetaHost, win.LPCWSTR, [*c]const GUID, [*c]win.LPVOID) callconv(.c) win.HRESULT,
 };
 
 pub const ICLRRuntimeInfo = extern struct {
@@ -74,12 +74,12 @@ pub const ICLRRuntimeInfo = extern struct {
 };
 
 pub const ICLRRuntimeInfoVtbl = extern struct {
-    QueryInterface: ?*const fn ([*c]ICLRRuntimeInfo, [*c]const GUID, [*c]?*anyopaque) callconv(.c) win.HRESULT,
-    AddRef: ?*const fn ([*c]ICLRRuntimeInfo) callconv(.c) win.ULONG,
-    Release: ?*const fn ([*c]ICLRRuntimeInfo) callconv(.c) win.ULONG,
-    _reserved3_to_8: [6]?*const anyopaque,
-    GetInterface: ?*const fn ([*c]ICLRRuntimeInfo, [*c]const GUID, [*c]const GUID, [*c]win.LPVOID) callconv(.c) win.HRESULT,
-    IsLoadable: ?*const fn ([*c]ICLRRuntimeInfo, [*c]win.BOOL) callconv(.c) win.HRESULT,
+    QueryInterface: *const fn ([*c]ICLRRuntimeInfo, [*c]const GUID, [*c]?*anyopaque) callconv(.c) win.HRESULT,
+    AddRef: *const fn ([*c]ICLRRuntimeInfo) callconv(.c) win.ULONG,
+    Release: *const fn ([*c]ICLRRuntimeInfo) callconv(.c) win.ULONG,
+    _reserved3_to_8: [6]*const anyopaque,
+    GetInterface: *const fn ([*c]ICLRRuntimeInfo, [*c]const GUID, [*c]const GUID, [*c]win.LPVOID) callconv(.c) win.HRESULT,
+    IsLoadable: *const fn ([*c]ICLRRuntimeInfo, [*c]win.BOOL) callconv(.c) win.HRESULT,
 };
 
 pub const ICorRuntimeHost = extern struct {
@@ -87,13 +87,13 @@ pub const ICorRuntimeHost = extern struct {
 };
 
 pub const ICorRuntimeHostVtbl = extern struct {
-    QueryInterface: ?*const fn ([*c]ICorRuntimeHost, [*c]const GUID, [*c]?*anyopaque) callconv(.c) win.HRESULT,
-    AddRef: ?*const fn ([*c]ICorRuntimeHost) callconv(.c) win.ULONG,
-    Release: ?*const fn ([*c]ICorRuntimeHost) callconv(.c) win.ULONG,
-    _reserved3_to_9: [7]?*const anyopaque,
-    Start: ?*const fn ([*c]ICorRuntimeHost) callconv(.c) win.HRESULT,
-    _reserved11: ?*const anyopaque,
-    CreateDomain: ?*const fn ([*c]ICorRuntimeHost, win.LPCWSTR, [*c]IUnknown, [*c][*c]IUnknown) callconv(.c) win.HRESULT,
+    QueryInterface: *const fn ([*c]ICorRuntimeHost, [*c]const GUID, [*c]?*anyopaque) callconv(.c) win.HRESULT,
+    AddRef: *const fn ([*c]ICorRuntimeHost) callconv(.c) win.ULONG,
+    Release: *const fn ([*c]ICorRuntimeHost) callconv(.c) win.ULONG,
+    _reserved3_to_9: [7]*const anyopaque,
+    Start: *const fn ([*c]ICorRuntimeHost) callconv(.c) win.HRESULT,
+    _reserved11: *const anyopaque,
+    CreateDomain: *const fn ([*c]ICorRuntimeHost, win.LPCWSTR, [*c]IUnknown, [*c][*c]IUnknown) callconv(.c) win.HRESULT,
 };
 
 pub const AppDomain = extern struct {
@@ -101,11 +101,11 @@ pub const AppDomain = extern struct {
 };
 
 pub const AppDomainVtbl = extern struct {
-    QueryInterface: ?*const fn ([*c]AppDomain, [*c]const GUID, [*c]?*anyopaque) callconv(.c) win.HRESULT,
-    AddRef: ?*const fn ([*c]AppDomain) callconv(.c) win.ULONG,
-    Release: ?*const fn ([*c]AppDomain) callconv(.c) win.ULONG,
-    _reserved3_to_44: [42]?*const anyopaque,
-    Load_3: ?*const fn ([*c]AppDomain, [*c]SAFEARRAY, [*c][*c]Assembly) callconv(.c) win.HRESULT,
+    QueryInterface: *const fn ([*c]AppDomain, [*c]const GUID, [*c]?*anyopaque) callconv(.c) win.HRESULT,
+    AddRef: *const fn ([*c]AppDomain) callconv(.c) win.ULONG,
+    Release: *const fn ([*c]AppDomain) callconv(.c) win.ULONG,
+    _reserved3_to_44: [42]*const anyopaque,
+    Load_3: *const fn ([*c]AppDomain, [*c]SAFEARRAY, [*c][*c]Assembly) callconv(.c) win.HRESULT,
 };
 
 pub const Assembly = extern struct {
@@ -113,11 +113,11 @@ pub const Assembly = extern struct {
 };
 
 pub const AssemblyVtbl = extern struct {
-    QueryInterface: ?*const fn ([*c]Assembly, [*c]const GUID, [*c]?*anyopaque) callconv(.c) win.HRESULT,
-    AddRef: ?*const fn ([*c]Assembly) callconv(.c) win.ULONG,
-    Release: ?*const fn ([*c]Assembly) callconv(.c) win.ULONG,
-    _reserved3_to_15: [13]?*const anyopaque,
-    EntryPoint: ?*const fn ([*c]Assembly, [*c][*c]MethodInfo) callconv(.c) win.HRESULT,
+    QueryInterface: *const fn ([*c]Assembly, [*c]const GUID, [*c]?*anyopaque) callconv(.c) win.HRESULT,
+    AddRef: *const fn ([*c]Assembly) callconv(.c) win.ULONG,
+    Release: *const fn ([*c]Assembly) callconv(.c) win.ULONG,
+    _reserved3_to_15: [13]*const anyopaque,
+    EntryPoint: *const fn ([*c]Assembly, [*c][*c]MethodInfo) callconv(.c) win.HRESULT,
 };
 
 pub const MethodInfo = extern struct {
@@ -125,9 +125,9 @@ pub const MethodInfo = extern struct {
 };
 
 pub const MethodInfoVtbl = extern struct {
-    QueryInterface: ?*const fn ([*c]MethodInfo, [*c]const GUID, [*c]?*anyopaque) callconv(.c) win.HRESULT,
-    AddRef: ?*const fn ([*c]MethodInfo) callconv(.c) win.ULONG,
-    Release: ?*const fn ([*c]MethodInfo) callconv(.c) win.ULONG,
-    _reserved3_to_36: [34]?*const anyopaque,
-    Invoke_3: ?*const fn ([*c]MethodInfo, VARIANT, [*c]SAFEARRAY, [*c]VARIANT) callconv(.c) win.HRESULT,
+    QueryInterface: *const fn ([*c]MethodInfo, [*c]const GUID, [*c]?*anyopaque) callconv(.c) win.HRESULT,
+    AddRef: *const fn ([*c]MethodInfo) callconv(.c) win.ULONG,
+    Release: *const fn ([*c]MethodInfo) callconv(.c) win.ULONG,
+    _reserved3_to_36: [34]*const anyopaque,
+    Invoke_3: *const fn ([*c]MethodInfo, VARIANT, [*c]SAFEARRAY, [*c]VARIANT) callconv(.c) win.HRESULT,
 };
