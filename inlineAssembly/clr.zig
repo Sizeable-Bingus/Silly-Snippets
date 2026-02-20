@@ -71,15 +71,15 @@ const variant_payload = extern struct {
     wReserved1: u16,
     wReserved2: u16,
     wReserved3: u16,
-    unnamed_0: variant_value,
+    v_value: variant_value,
 };
 
 const variant_union = extern union {
-    unnamed_0: variant_payload,
+    v_payload: variant_payload,
 };
 
 pub const VARIANT = extern struct {
-    unnamed_0: variant_union,
+    v_union: variant_union,
 };
 
 pub const VARIANTARG = VARIANT;

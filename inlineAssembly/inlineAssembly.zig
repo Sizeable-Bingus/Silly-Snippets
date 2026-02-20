@@ -168,9 +168,9 @@ fn executeAssembly(allocator: std.mem.Allocator, assembly: []const u8, args: []c
 
     var vt_psa: clr.VARIANT = std.mem.zeroes(clr.VARIANT);
     defer _ = VariantClear(&vt_psa);
-    vt_psa.unnamed_0.unnamed_0.vt = (clr.VT_ARRAY | clr.VT_BSTR);
-    vt_psa.unnamed_0.unnamed_0.unnamed_0.parray = SafeArrayCreateVector(clr.VT_BSTR, 0, @intCast(num_args));
-    if (vt_psa.unnamed_0.unnamed_0.unnamed_0.parray == null) {
+    vt_psa.v_union.v_payload.vt = (clr.VT_ARRAY | clr.VT_BSTR);
+    vt_psa.v_union.v_payload.v_value.parray = SafeArrayCreateVector(clr.VT_BSTR, 0, @intCast(num_args));
+    if (vt_psa.v_union.v_payload.v_value.parray == null) {
         std.debug.print("[ERR:SafeArrayCreateVector]\n", .{});
         return;
     }
@@ -178,7 +178,7 @@ fn executeAssembly(allocator: std.mem.Allocator, assembly: []const u8, args: []c
     var i: win.LONG = 0;
     while (i < num_args) : (i += 1) {
         const a_str = SysAllocString(args_array[@intCast(i)]);
-        if (SafeArrayPutElement(vt_psa.unnamed_0.unnamed_0.unnamed_0.parray, &i, a_str) != win.S_OK) {
+        if (SafeArrayPutElement(vt_psa.v_union.v_payload.v_value.parray, &i, a_str) != win.S_OK) {
             std.debug.print("[ERR:SafeArrayPutElement]\n", .{});
         }
     }
@@ -255,11 +255,10 @@ fn executeAssembly(allocator: std.mem.Allocator, assembly: []const u8, args: []c
 
     var obj = std.mem.zeroes(clr.VARIANT);
     defer _ = VariantClear(&obj);
-    obj.unnamed_0.unnamed_0.vt = clr.VT_NULL;
+    obj.v_union.v_payload.vt = clr.VT_NULL;
 
     hr = method_info.lpVtbl.*.Invoke_3(method_info, obj, @ptrCast(psa_method_args), @ptrCast(&ret_val));
 
-    //TODO: read output
     var output_buf = try allocator.alloc(u8, 65535);
     defer allocator.free(output_buf);
     const output_size = try win.ReadFile(h_pipe, output_buf, null);
