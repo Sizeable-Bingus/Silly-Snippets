@@ -1,0 +1,82 @@
+{
+  "name": "TEST",
+  "get": {
+    "verb": "GET",
+    "uris": [
+      "/my/uri/path"
+    ],
+    "client": {
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36"
+      },
+      "parameters": {
+        "MyKey": "value"
+      },
+      "domain_specific_headers": {
+        "https://example.com:443": {
+          "User-Agent": "Test"
+        }
+      },
+      "message": {
+        "location": "cookie",
+        "name": "sessionID"
+      },
+      "transforms": [
+        {
+          "action": "base64url"
+        }
+      ]
+    },
+    "server": {
+      "headers": {
+        "Server": "Server",
+        "Cache-Control": "max-age=0, no-cache"
+      },
+      "transforms": [
+        {
+          "action": "xor",
+          "value": "keyHere"
+        },
+        {
+          "action": "base64url"
+        },
+        {
+          "action": "prepend",
+          "value": "{\"response\":\""
+        },
+        {
+          "action": "append",
+          "value": "\"}"
+        },
+        {
+          "action": "netbios"
+        }
+      ]
+    }
+  },
+  "post": {
+    "uris": [
+      "/my/other/path"
+    ],
+    "verb": "POST",
+    "client": {
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36"
+      },
+      "transforms": [
+        {
+          "action": "xor",
+          "value": "keyHere"
+        },
+        {
+          "action": "base64url"
+        }
+      ]
+    },
+    "server": {
+      "headers": {
+        "Keep-Alive": "true"
+      }
+    }
+  }
+}
