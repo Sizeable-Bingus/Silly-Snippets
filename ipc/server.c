@@ -5,7 +5,7 @@
 int main() {
     HANDLE hPipe = CreateNamedPipeA(PIPE_NAME, PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE, 1, 0, 0, 0, NULL);
     if (hPipe == NULL || hPipe == INVALID_HANDLE_VALUE) {
-        printf("[!] Failed to create named pipe\n");
+        printf("[!] Failed to create named pipe 0x%lX\n", GetLastError());
         return 1;
     }
 
