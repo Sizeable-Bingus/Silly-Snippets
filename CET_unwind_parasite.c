@@ -29,7 +29,8 @@ typedef struct _STUB_ARG {
   UINT_PTR p_rbx;         // 24
   UINT_PTR p_rsi;         // 32
   UINT_PTR p_rdi;         // 40
-  STUB_CALL_ARGS args;    // 48
+  UINT_PTR lpFiber;       // 48
+  STUB_CALL_ARGS args;    // 56
 } STUB_ARG;
 
 __attribute__((naked))
@@ -45,10 +46,10 @@ void stubSetup(STUB_ARG* arg) {
         "mov rsi, [rcx + 8] \n"       // p_call
 
         "mov r11, rcx \n"
-        "mov rdx, [rcx + 56] \n"      // arg2
-        "mov r8,  [rcx + 64] \n"      // arg3
-        "mov r9,  [rcx + 72] \n"      // arg4
-        "mov rcx, [rcx + 48] \n"      // arg1
+        "mov rdx, [rcx + 64] \n"      // arg2
+        "mov r8,  [rcx + 72] \n"      // arg3
+        "mov r9,  [rcx + 80] \n"      // arg4
+        "mov rcx, [rcx + 56] \n"      // arg1
 
         "jmp [r11] \n");
 }
@@ -57,36 +58,48 @@ __attribute__((naked))
 void stubReturn() {
     asm(//"add rsp, 8\n"
         "add rsp, 0xA8 \n"
+        "mov rcx, [rdi + 48] \n"
+        "call SwitchToFiber\n"
+
         "mov rbx, [rdi + 24] \n"      // restore p_rbx
         "mov rsi, [rdi + 32] \n"      // restore p_rsi
         "mov rdi, [rdi + 40] \n"      // restore p_rdi
+
         "ret \n");
 }
 
 
 int main() {
 
-    HMODULE hUcrt = LoadLibraryA("C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\149.0.4022.62\\msedge_elf.dll");
-    if (hUcrt == NULL) return 1;
-    printf("0x%p\n", hUcrt);
-    hUcrt = (HMODULE)((UINT_PTR)hUcrt + 0x13CAF);
-    printf("0x%p\n", hUcrt);
+    HMODULE hMod = LoadLibraryA("C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\149.0.4022.62\\msedge_elf.dll");
+    if (hMod == NULL) return 1;
+    printf("0x%p\n", hMod);
+    hMod = (HMODULE)((UINT_PTR)hMod + 0x13CAF);
+    printf("0x%p\n", hMod);
     
     DWORD dwOld;
-    VirtualProtect(hUcrt, 4, PAGE_EXECUTE_READWRITE, &dwOld);
-    memcpy(hUcrt, g_stub, 4);
-    printf("0x%p\n", hUcrt);
+    VirtualProtect(hMod, 4, PAGE_EXECUTE_READWRITE, &dwOld);
+    memcpy(hMod, g_stub, 4);
+    printf("0x%p\n", hMod);
 
+    LPVOID lpRootFiber = ConvertThreadToFiber(NULL);
+    if (lpRootFiber == NULL) {
+        printf("NO FIBER\n");
+    } else {
+        printf("0x%p\n", lpRootFiber);
+    }
     STUB_CALL_ARGS call_args = { .arg1 = 0, .arg2 = 0, .arg3 = 0, .arg4 = MB_OK };
     STUB_ARG stub_arg = { 
-        .p_stub = (UINT_PTR)hUcrt,
+        .p_stub = (UINT_PTR)hMod,
         .p_call = (UINT_PTR)MessageBoxA,
         .p_jump = (UINT_PTR)stubReturn,
         .p_rbx = 0,
         .p_rsi = 0,
         .p_rdi = 0,
-        .args = call_args };
-    ConvertThreadToFiber(NULL);
+        .lpFiber = (UINT_PTR)lpRootFiber,
+        .args = call_args,
+    };
     LPVOID p_fiber = CreateFiber(0, (LPFIBER_START_ROUTINE)stubSetup, &stub_arg);
     SwitchToFiber(p_fiber);
+    MessageBoxA(NULL, "A", "A", MB_OK);
 }
