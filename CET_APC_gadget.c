@@ -42,6 +42,42 @@ typedef struct {
     BOOL sets_fp;
 } STACK_FRAME;
 
+enum ERROR_LEVEL {
+    log,
+    error,
+};
+
+// This is wonky
+void dlog(enum ERROR_LEVEL err_level, PCHAR func_name, BOOL get_last_err, PCHAR fmt, ...) {
+    DWORD err = GetLastError();
+    va_list print_va;
+
+    va_start(print_va, fmt);
+    int msg_len = vsnprintf(NULL, 0, fmt, print_va);
+    va_end(print_va);
+    if (msg_len < 0) return;
+
+    PCHAR msg_buf = malloc(msg_len + 1);
+    va_start(print_va, fmt);
+    vsnprintf(msg_buf, msg_len + 1, fmt, print_va);
+    va_end(print_va);
+
+    PCHAR err_lvl_str = NULL;
+    if (err_level == log) err_lvl_str = "DBG";
+    else if (err_level == error) err_lvl_str = "ERROR";
+
+   
+    if (get_last_err) {
+        LPSTR err_msg = NULL;
+        DWORD len = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, err, LANG_SYSTEM_DEFAULT, (LPSTR)&err_msg, 0, NULL);
+        err_msg[len-3] = '\0';
+        printf("[%s][%s][%s] -> %s", err_lvl_str, func_name, err_msg, msg_buf);
+        LocalFree(err_msg);
+    }
+    else printf("[%s][%s] -> %s", err_lvl_str, func_name, msg_buf);
+    free(msg_buf);
+}
+
 #ifdef WIN_X64
 __attribute__((naked))
 void sleepExSetup() {
@@ -120,7 +156,7 @@ PRUNTIME_FUNCTION getRuntimeFunction(LPVOID address, PDWORD64 p_image_base) {
     UNWIND_HISTORY_TABLE history_table = { 0 };
     PRUNTIME_FUNCTION p_runtime_function = RtlLookupFunctionEntry((DWORD64)address, &image_base, &history_table);
     if (p_runtime_function == NULL) {
-        printf("[getFrameSize] ERR \n");
+        dlog(error, "getRuntimeFunction", FALSE, "RtlLookupFunctionEntry failed\n");
     }
     if (p_image_base != NULL) *p_image_base = image_base;
     return p_runtime_function;
@@ -208,12 +244,12 @@ BOOL findGadget(HMODULE h_module, OUT PGADGET gadget) {
     // This could be expaned for other registers and displacements probably
     BYTE call[2] = { 0xFF, 0x90 }; // call [rax +/- 32_disp]
     BYTE jmp[2] = { 0xFF, 0x66 };  // jmp [rsi +/- 8_disp]
-    printf("[findGadget] 0x%llx 0x%llx\n", text_start, text_end);
+    dlog(log, "findGadget", FALSE, "0x%llx 0x%llx\n", text_start, text_end);
     for (PBYTE i = (PBYTE)text_start; (UINT_PTR)i < text_end; i++) {
         if (memcmp(i, call, 2) == 0 && memcmp(i+6, jmp, 2) == 0) {
             PRUNTIME_FUNCTION p_runtime_func = getRuntimeFunction(i, NULL);
             if (p_runtime_func == NULL) {
-                printf("[!] Could not get RUNTIME_FUNCTION for 0x%p\n", i);
+                dlog(log, "findGadget", FALSE, "Could not get RUNTIME_FUNCTION for 0x%p\n", i);
                 continue;
             }
             gadget->call = i;
@@ -222,7 +258,7 @@ BOOL findGadget(HMODULE h_module, OUT PGADGET gadget) {
             gadget->call_disp = *(PINT32)(i+2);
             gadget->jmp_disp = *(PINT8)(i+8);
 
-            printf("[findGadget] 0x%p : %d : 0x%x : 0x%llx\n", i, gadget->call_disp, gadget->jmp_disp, gadget->frame_size);
+            dlog(log, "findGadget", FALSE, "0x%p : %d : 0x%x : 0x%llx\n", i, gadget->call_disp, gadget->jmp_disp, gadget->frame_size);
             return TRUE;
         }
     }
@@ -230,85 +266,63 @@ BOOL findGadget(HMODULE h_module, OUT PGADGET gadget) {
 }
 #endif
 
-// GADGET initGadget() {
-//     HMODULE h_mod = NULL;
-//     GADGET gadget = { 0 };
-//     PCHAR modules[] = { "ucrtbase", "msvcrt", "kernelbase", "ntdll" };
-//     printf("[+] %lld\n", sizeof(modules)/sizeof(PCHAR));
-//     for (int i = 0; i < sizeof(modules)/sizeof(PCHAR); i++) {
-//         h_mod = GetModuleHandleA(modules[i]);
-//         if (h_mod == NULL) break;
 
-//         if (!findGadget(h_mod, &gadget)) printf("[!] Could not find gadget in %s\n", modules[i]);
-//         else break;
-//     }
-
-//     DWORD64 image_base = 0;
-//     PRUNTIME_FUNCTION p_runtime_function = getRuntimeFunction(gadget.call, &image_base);
-//     if (p_runtime_function == NULL) {
-//         printf("[!] Could not get gadget function\n");
-//         return ;
-//     }
-//     DWORD frame_size = getFrameSize(p_runtime_function, image_base);
-//     printf("[FRAME_SIZE] 0x%lx\n", frame_size);
-// }
-
-UINT_PTR stitch(HANDLE h_thread) {
-    printf("[+] Queueing APC : 0x%p\n", (LPVOID)interuptStub);
-    STARTUPINFO si = { 0 };
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi = { 0 };
+// Dont pass a struct by value to this
+UINT_PTR stitch(HANDLE h_thread, LPVOID function, DWORD argc, ...) {
+    dlog(log, "stitch", FALSE, "Queueing APC : 0x%p\n", (LPVOID)interuptStub);
     FUNC_CALL func_call = { 0 };
-    func_call.function = (UINT_PTR)CreateProcessA;
-    func_call.argc = 10;
-    func_call.argv[0] = (UINT_PTR)"C:\\Windows\\System32\\calc.exe";
-    func_call.argv[4] = FALSE;
-    func_call.argv[8] = (UINT_PTR)&si;
-    func_call.argv[9] = (UINT_PTR)&pi;
-
-    // Needs to keep searching until it finds one    
+    func_call.function = (UINT_PTR)function;
+    func_call.argc = argc;
+    va_list args;
+    va_start(args, argc);
+    for (DWORD i = 0; i < argc; i++) {
+        func_call.argv[i] = va_arg(args, UINT_PTR);
+    }
+    va_end(args);
+    
     HMODULE h_mod = NULL;
     GADGET gadget = { 0 };
-    PCHAR modules[] = { "ucrtbase", "msvcrt", "kernelbase", "ntdll" };
-    printf("[+] %lld\n", sizeof(modules)/sizeof(PCHAR));
+    PCHAR modules[] = { "ucrtbasee", "msvcrte", "kernelbasee", "ntdlle" };
+    dlog(log, "stitch", FALSE, "%lld modules\n", sizeof(modules)/sizeof(PCHAR));
     for (int i = 0; i < sizeof(modules)/sizeof(PCHAR); i++) {
         h_mod = GetModuleHandleA(modules[i]);
         if (h_mod == NULL) continue;
 
-        if (!findGadget(h_mod, &gadget)) printf("[!] Could not find gadget in %s\n", modules[i]);
+        if (!findGadget(h_mod, &gadget)) dlog(log, "stitch", FALSE, "Could not find gadget in %s\n", modules[i]);
         else {
-            printf("[+] Found gadget in %s\n", modules[i]);
+            dlog(log, "stitch", FALSE, "Found gadget in %s\n", modules[i]);
             break;
         }
+    } if (gadget.call == 0) {
+        dlog(error, "stitch", FALSE, "Could not locate gadget in module list\n");
+        return -1;
     }
 
     HANDLE h_done = CreateEvent(NULL, TRUE, FALSE, NULL);
-
-    // FUNC_CALL call = { 0 };
-    // call.function = (UINT_PTR)MessageBoxA;
-    // call.argc = 4;
-    // call.argv[0] = 0;
-    // call.argv[1] = 0;
-    // call.argv[3] = 0;
-    // call.argv[4] = 0;
     INTERRUPT_ARG arg = { .gadget = gadget, .func_call = func_call, .h_done = h_done };
 
-    if (!QueueUserAPC2((PAPCFUNC)interuptStub, h_thread, (ULONG_PTR)&arg, QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC | QUEUE_USER_APC_CALLBACK_DATA_CONTEXT)) {
-        printf("[ERR:QueueUserAPC2] : 0x%lx\n", GetLastError());
+    if (!QueueUserAPC2((PAPCFUNC)interuptStub, (HANDLE)-4, (ULONG_PTR)&arg, QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC | QUEUE_USER_APC_CALLBACK_DATA_CONTEXT)) {
+        dlog(error, "stitch", TRUE, "QueueUserAPC2 failed\n");
+        return -1;
     }
     WaitForSingleObject(h_done, INFINITE);
     return arg.ret;
 }
 
 int main() {
-    printf("[ARG] FUNC_CALL : %llu\tGADGET : %llu\trsi_save : %llu\n", offsetof(INTERRUPT_ARG, func_call), offsetof(INTERRUPT_ARG, gadget), offsetof(INTERRUPT_ARG, rsi_save));
+    dlog(log, "main", FALSE, "FUNC_CALL : %llu\tGADGET : %llu\trsi_save : %llu\n", offsetof(INTERRUPT_ARG, func_call), offsetof(INTERRUPT_ARG, gadget), offsetof(INTERRUPT_ARG, rsi_save));
 
     HANDLE h_thread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)sleepExSetup, NULL, 0, NULL);
     Sleep(100);
 
-    printf("0x%p\n", interuptStub);
-    BOOL b_createprocess = (BOOL)stitch(h_thread);
-    printf("[+] stitch(CreateProcessA) : 0x%x", b_createprocess);
+    dlog(log, "main", FALSE, "0x%p\n", interuptStub);
+
+
+    STARTUPINFO si = { 0 };
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = { 0 };
+    BOOL b_createprocess = (BOOL)stitch(h_thread, CreateProcessA, 10, "C:\\Windows\\System32\\calc.exe", NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    dlog(log, "main", FALSE, "stitch(CreateProcessA) : 0x%x\n", b_createprocess);
 
     return 0;
 }
