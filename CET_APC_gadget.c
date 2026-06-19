@@ -1,5 +1,4 @@
 #include <windows.h>
-#include <ntstatus.h>
 #include <stdio.h>
 #include <stddef.h>
 
@@ -22,8 +21,10 @@ typedef struct _GADGET {
 typedef struct _INTERRUPT_ARG {
     FUNC_CALL func_call;
     GADGET gadget;
-    UINT_PTR rbp_save; // 120
+    UINT_PTR rsi_save; // 120
     UINT_PTR rbx_save; // 128
+    UINT_PTR ret;      // 136
+    HANDLE   h_done;   // 144
 } INTERRUPT_ARG, *PINTERRUPT_ARG;
 
 #ifdef WIN_X64
@@ -36,12 +37,12 @@ void sleepExSetup() {
 
 __attribute__((naked))
 void interuptStub(PAPC_CALLBACK_DATA data) {
-  __asm("sub rsp, 88\n" // combase gadget frame size
+  __asm("sub rsp, 0x118\n" // rpcrt4 gadget frame size
 
         "mov r10, [rcx]\n"     // INTERRUPT_ARG / function
         "mov r11, [rcx + 8]\n" // ContextRecord
 
-        "mov qword ptr [r10 + 120], rbp\n" // Save rbp
+        "mov qword ptr [r10 + 120], rsi\n" // Save rsi
         "mov qword ptr [r10 + 128], rbx\n" // Save rbx
         "mov rbx, r10\n" // Store INTERRUPT_ARG for epilogue
 
@@ -59,7 +60,7 @@ void interuptStub(PAPC_CALLBACK_DATA data) {
         "cmp rax, 4\n"
         "jl .done\n"
         "mov r8, [r11 + rax*8]\n"
-        "mov qword ptr [rsp + rcx*8 + 0x28], r8\n"
+        "mov qword ptr [rsp + rcx*8 + 0x20], r8\n"
         "dec rax\n"
         "dec rcx\n"
         "jmp .stackArgs\n"
@@ -73,8 +74,8 @@ void interuptStub(PAPC_CALLBACK_DATA data) {
 
         //"mov qword ptr [r10 + 96 + 8], OFFSET interruptEpilogue\n" // target epilogue
         "movsx rdx, byte ptr [r10 + 96 + 20]\n"  // jmp displacement
-        "lea rbp, [r10 + 96 + 8]\n" // pointer to epilogue
-        "sub rbp, rdx\n"
+        "lea rsi, [r10 + 96 + 8]\n" // pointer to epilogue
+        "sub rsi, rdx\n"
 
         "mov rcx, [r11]\n"
         "mov rdx, [r11 + 8]\n"
@@ -86,10 +87,15 @@ void interuptStub(PAPC_CALLBACK_DATA data) {
 __attribute__((naked))
 void interruptEpilogue() {
     __asm(
-        "add rsp, 88\n"
+        "add rsp, 0x118\n"
         "mov rcx, rbx\n"
-        "mov rbp, [rcx+120]\n"
+        "mov rsi, [rcx+120]\n"
         "mov rbx, [rcx+128]\n"
+        "mov qword ptr [rcx+136], rax\n"
+
+        "mov rdx, [rcx+144]\n"
+        "mov rcx, rdx\n"
+        "call SetEvent\n"
         "ret\n"
     );
 }
@@ -118,7 +124,7 @@ BOOL findGadget(HMODULE h_module, OUT PGADGET gadget) {
 
     // This could be expaned for other registers and displacements probably
     BYTE call[2] = { 0xFF, 0x90 }; // call [rax +/- 32_disp]
-    BYTE jmp[2] = { 0xFF, 0x65 };  // jmp [rbp +/- 8_disp]
+    BYTE jmp[2] = { 0xFF, 0x66 };  // jmp [rsi +/- 8_disp]
     printf("[findGadget] 0x%llx 0x%llx\n", text_start, text_end);
     for (PBYTE i = (PBYTE)text_start; (UINT_PTR)i < text_end; i++) {
         if (memcmp(i, call, 2) == 0 && memcmp(i+6, jmp, 2) == 0) {
@@ -133,87 +139,49 @@ BOOL findGadget(HMODULE h_module, OUT PGADGET gadget) {
     return TRUE;
 }
 
-void stitch(HANDLE h_thread) {
+UINT_PTR stitch(HANDLE h_thread) {
     printf("[+] Queueing APC : 0x%p\n", (LPVOID)interuptStub);
-    // STARTUPINFO si = { 0 };
-    // si.cb = sizeof(si);
-    // PROCESS_INFORMATION pi = { 0 };
-    // FUNC_CALL func_call = { 0 };
-    // func_call.function = (UINT_PTR)CreateProcessA;
-    // func_call.argc = 10;
-    // func_call.argv[0] = (UINT_PTR)"C:\\Windows\\System32\\calc.exe";
-    // func_call.argv[4] = FALSE;
-    // func_call.argv[8] = (UINT_PTR)&si;
-    // func_call.argv[9] = (UINT_PTR)&pi;
+    STARTUPINFO si = { 0 };
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = { 0 };
+    FUNC_CALL func_call = { 0 };
+    func_call.function = (UINT_PTR)CreateProcessA;
+    func_call.argc = 10;
+    func_call.argv[0] = (UINT_PTR)"C:\\Windows\\System32\\calc.exe";
+    func_call.argv[4] = FALSE;
+    func_call.argv[8] = (UINT_PTR)&si;
+    func_call.argv[9] = (UINT_PTR)&pi;
     
-    
-// CreateProcessA(LPCSTR lpApplicationName,
-// LPSTR lpCommandLine,
-// LPSECURITY_ATTRIBUTES lpProcessAttributes,
-// LPSECURITY_ATTRIBUTES lpThreadAttributes,
-// WINBOOL bInheritHandles,
-// DWORD dwCreationFlags,
-// LPVOID lpEnvironment,
-// LPCSTR lpCurrentDirectory,
-// LPSTARTUPINFOA lpStartupInfo,
-// LPPROCESS_INFORMATION lpProcessInformation)
-
-    HMODULE h_combase = GetModuleHandleA("combase.dll");
-    if (h_combase == NULL) h_combase = LoadLibraryA("combase.dll");
+    HMODULE h_combase = GetModuleHandleA("rpcrt4.dll");
+    if (h_combase == NULL) h_combase = LoadLibraryA("rpcrt4.dll");
     GADGET gadget = { 0 };
     findGadget(h_combase, &gadget);
+    HANDLE h_done = CreateEvent(NULL, TRUE, FALSE, NULL);
 
-    FUNC_CALL call = { 0 };
-    call.function = (UINT_PTR)MessageBoxA;
-    call.argc = 4;
-    call.argv[0] = 0;
-    call.argv[1] = 0;
-    call.argv[3] = 0;
-    call.argv[4] = 0;
-    INTERRUPT_ARG arg = { .gadget = gadget, .func_call = call };
+    // FUNC_CALL call = { 0 };
+    // call.function = (UINT_PTR)MessageBoxA;
+    // call.argc = 4;
+    // call.argv[0] = 0;
+    // call.argv[1] = 0;
+    // call.argv[3] = 0;
+    // call.argv[4] = 0;
+    INTERRUPT_ARG arg = { .gadget = gadget, .func_call = func_call, .h_done = h_done };
 
-    printf("[ARG] FUNC_CALL : %llu\tGADGET : %llu\trbp_save : %llu\n", offsetof(INTERRUPT_ARG, func_call), offsetof(INTERRUPT_ARG, gadget), offsetof(INTERRUPT_ARG, rbp_save));
+    printf("[ARG] FUNC_CALL : %llu\tGADGET : %llu\trsi_save : %llu\n", offsetof(INTERRUPT_ARG, func_call), offsetof(INTERRUPT_ARG, gadget), offsetof(INTERRUPT_ARG, rsi_save));
     if (!QueueUserAPC2((PAPCFUNC)interuptStub, h_thread, (ULONG_PTR)&arg, QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC | QUEUE_USER_APC_CALLBACK_DATA_CONTEXT)) {
         printf("[ERR:QueueUserAPC2] : 0x%lx\n", GetLastError());
     }
-    getchar();
+    WaitForSingleObject(h_done, INFINITE);
+    return arg.ret;
 }
 
 int main() {
-    // QueueUserAPC2_t QueueUserAPC2 = (QueueUserAPC2_t)GetProcAddress(
-    //     GetModuleHandle("kernel32.dll"),
-    //     "QueueUserAPC2"
-    // );
-    // if (QueueUserAPC2 == NULL) {
-    //     printf("[ERR:GetProcAddress]\n");
-
     HANDLE h_thread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)sleepExSetup, NULL, 0, NULL);
-    Sleep(500);
-
-    // // Avoid thread creation and RtlTimer* in callstack but introduce UB
-    // // Technically UB but from what I can see RDX is always SleepEx which is true
-    // // Identifying this thread is tricky...
-    // HANDLE h_timer = 0;
-    // // QueueUserWorkItem((LPTHREAD_START_ROUTINE)SleepEx, (PVOID)INFINITE, 0);
-    // // getchar();
-    // // enumThreads(GetCurrentProcess());
-
-    // stitch(h_thread);
-    // stitch(h_thread);
-
-    HMODULE h_combase = LoadLibraryA("combase.dll");
-    if (h_combase == NULL) {
-        printf("ERR\n");
-        return 1;
-    }
+    Sleep(100);
 
     printf("0x%p\n", interuptStub);
-    getchar();
-    stitch(h_thread);
-
-    //offsetof(INTERRUPT_ARG, func_call);
-
-    getchar();
+    BOOL b_createprocess = (BOOL)stitch(h_thread);
+    printf("[+] stitch(CreateProcessA) : 0x%x", b_createprocess);
 
     return 0;
 }
