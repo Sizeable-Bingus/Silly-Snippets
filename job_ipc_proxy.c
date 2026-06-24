@@ -2,6 +2,8 @@
 #include <psapi.h>
 #include <stdio.h>
 
+#define H_SENTINEL (HANDLE)-1
+
 enum IPC_OP {
     SEND_HANDLE,
     CALL
@@ -19,10 +21,10 @@ typedef struct _IPC_CALL {
     UINT_PTR args[10];
 } IPC_CALL;
 
-typedef struct _VP_IPC_RET {
-    BOOL b_vp;
+typedef struct _IPC_VP_RET {
+    BOOL vp_ret;
     DWORD old_protect;
-} VP_IPC_RET, PVP_IPC_RET;
+} IPC_VP_RET;
 
 VOID sendMessage(HANDLE h_write, HANDLE h_read, PBYTE send, SIZE_T send_len, PBYTE recv, SIZE_T recv_len) {
     DWORD written = 0;
@@ -40,7 +42,6 @@ void startChild(PHANDLE ph_write, PHANDLE ph_read) {
     CHAR proc_name[MAX_PATH];
     DWORD proc_size = sizeof(proc_name);
     QueryFullProcessImageNameA(GetCurrentProcess(), 0, proc_name, &proc_size);
-    printf("[+] %s\n", proc_name);
     
     HANDLE h_job = CreateJobObjectA(NULL, NULL);
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION info = { 0 };
@@ -60,6 +61,7 @@ void startChild(PHANDLE ph_write, PHANDLE ph_read) {
     si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdInput = parent_read;
     si.hStdOutput = child_write;
+    si.hStdError = H_SENTINEL;
     CreateProcessA(proc_name, NULL, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
     AssignProcessToJobObject(h_job, pi.hProcess);
 
@@ -67,12 +69,28 @@ void startChild(PHANDLE ph_write, PHANDLE ph_read) {
     *ph_read = child_read;
 
     HANDLE h_parent = 0;
-    if (!DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), pi.hProcess, &h_parent, PROCESS_VM_OPERATION, FALSE, 0)) {
-        printf("[!] DuplicateHandle failed\n");
-    }
+    DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), pi.hProcess, &h_parent, PROCESS_VM_OPERATION, FALSE, 0);
 
     IPC_HANDLE ipc_handle = { .op = SEND_HANDLE, .handle = h_parent };
     sendMessage(*ph_write, *ph_read, (PBYTE)&ipc_handle, sizeof(IPC_HANDLE), NULL, 0);
+}
+
+void startParent() {
+    CHAR proc_name[MAX_PATH];
+    DWORD proc_size = sizeof(proc_name);
+    QueryFullProcessImageNameA(GetCurrentProcess(), 0, proc_name, &proc_size);
+
+    PROCESS_INFORMATION pi;
+    STARTUPINFOEXA si = { 0 };
+    SIZE_T size = 0;
+    DWORD64 pol = PROCESS_CREATION_MITIGATION_POLICY_PROHIBIT_DYNAMIC_CODE_ALWAYS_ON;
+    si.StartupInfo.cb = sizeof(si);
+    InitializeProcThreadAttributeList(NULL, 1, 0, &size);
+    si.lpAttributeList = HeapAlloc(GetProcessHeap(), 0, size);
+    InitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &size);
+    UpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY, &pol, sizeof(pol), NULL, NULL);
+    CreateProcessA(proc_name, NULL, NULL, NULL, FALSE, EXTENDED_STARTUPINFO_PRESENT, NULL, NULL, (STARTUPINFO*)&si, &pi);
+    HeapFree(GetProcessHeap(), 0, si.lpAttributeList);
 }
 
 void childMain() {
@@ -96,11 +114,11 @@ void childMain() {
                 ReadFile(h_read, &call, sizeof(call), &read, NULL);
 
                 DWORD old_protect = 0;
-                BOOL b_vp = VirtualProtectEx(h_parent, (LPVOID)call.args[0], call.args[1], call.args[2], &old_protect);
-
+                BOOL vp_ret = VirtualProtectEx(h_parent, (LPVOID)call.args[0], call.args[1], call.args[2], &old_protect);
+                
                 DWORD written = 0;
-                VP_IPC_RET vp_ret = { .b_vp = b_vp, .old_protect = old_protect };
-                WriteFile(h_write, &vp_ret, sizeof(vp_ret), &written, NULL);
+                IPC_VP_RET ipc_vp_ret = { .vp_ret = vp_ret, .old_protect = old_protect };
+                WriteFile(h_write, &ipc_vp_ret, sizeof(ipc_vp_ret), &written, NULL);
                 break;
             }
         }
@@ -109,14 +127,21 @@ void childMain() {
 
 int main() {
     HANDLE h_write, h_read;
-    BOOL in_job = FALSE;
-    IsProcessInJob(GetCurrentProcess(), NULL, &in_job);
-    if (!in_job) {
+    HANDLE h_sentinel = GetStdHandle(STD_ERROR_HANDLE);
+
+    if (h_sentinel != H_SENTINEL) {
+        PROCESS_MITIGATION_DYNAMIC_CODE_POLICY dcp = { 0 };
+        GetProcessMitigationPolicy(GetCurrentProcess(), ProcessDynamicCodePolicy, &dcp, sizeof(dcp));
+        if (!dcp.ProhibitDynamicCode) {
+            startParent();
+            return 0;
+        }
         startChild(&h_write, &h_read);
+
         int i = 0;
         while (i < 5) {
             LPVOID alloc = VirtualAlloc(NULL, 1337, MEM_COMMIT, PAGE_READWRITE);
-            VP_IPC_RET ret = { 0 };
+            IPC_VP_RET ret = { 0 };
             IPC_CALL msg = { .op = CALL, .func = VirtualProtect, .argc = 4 };
             msg.args[0] = (UINT_PTR)alloc;
             msg.args[1] = 1337;
@@ -125,20 +150,8 @@ int main() {
             sendMessage(h_write, h_read, (PBYTE)&msg, sizeof(msg), (PBYTE)&ret, sizeof(ret));
             i++;
         }
-        while (TRUE) {
-            LPVOID alloc = VirtualAlloc(NULL, 1337, MEM_COMMIT, PAGE_READWRITE);
-            VP_IPC_RET ret = { 0 };
-            IPC_CALL msg = { .op = CALL, .func = VirtualProtect, .argc = 4 };
-            msg.args[0] = (UINT_PTR)alloc;
-            msg.args[1] = 1337;
-            msg.args[2] = PAGE_EXECUTE_READWRITE;
-            msg.args[3] = 0;
-            sendMessage(h_write, h_read, (PBYTE)&msg, sizeof(msg), (PBYTE)&ret, sizeof(ret));
-            getchar();
-        }
+        Sleep(20000);
     }
     else
         childMain();
-
-    getchar();
 }
